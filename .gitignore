@@ -1,0 +1,15 @@
+.env
+.venv
+venv
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/storage/
+cms/node_modules/
+cms/dist/
+viewer/node_modules/
+viewer/dist/
+_incoming/
+.DS_Store
+*.log

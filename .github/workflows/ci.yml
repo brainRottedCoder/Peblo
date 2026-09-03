@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: peblo
+          POSTGRES_PASSWORD: peblo
+          POSTGRES_DB: peblo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U peblo -d peblo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://peblo:peblo@localhost:5432/peblo_test
+      SECRET_KEY: ci-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: ruff check app
+      - run: alembic upgrade head
+      - run: pytest -q
+
+  cms:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cms
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  viewer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: viewer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f backend/Dockerfile -t peblo-api:ci .
+      - run: docker build -f cms/Dockerfile -t peblo-cms:ci --build-arg VITE_API_URL=http://localhost:8000 .
+      - run: docker build -f viewer/Dockerfile -t peblo-viewer:ci --build-arg VITE_API_URL=http://localhost:8000 .
+
+  deploy:
+    # Written, not live. There is no production account attached to this repo.
+    # On a real Peblo deploy we would:
+    #   1. push the three images to GHCR / ECR
+    #   2. run alembic upgrade on the target Postgres
+    #   3. roll the API (new task), then the two static UIs
+    #   4. only after /health/ready is green, flip the load-balancer target
+    # Secrets (SECRET_KEY, DATABASE_URL, R2 keys) live in the host's secret
+    # manager — never in this file. See README.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [api, cms, viewer, images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain deploy (no cloud target)
+        run: |
+          echo "Deploy is intentionally a no-op."
+          echo "Images were built in the images job."
+          echo "To actually ship: tag peblo-api/cms/viewer, push to a registry,"
+          echo "apply the new task definition, wait for /health/ready, then shift traffic."
